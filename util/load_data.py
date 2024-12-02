@@ -2,8 +2,9 @@ import os
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 import numpy as np
+from util.noise_dataset import MixedDataset
 
-def load_dataset(subset='Train', data_dir='Deepfake_Dataset', batch_size=32, shuffle=True, data_percentage=1.0):
+def load_dataset(subset='Train', data_dir='Deepfake_Dataset', batch_size=32, shuffle=True, data_percentage=1.0, noise=False):
     """
     Loads a subset of the dataset.
 
@@ -37,8 +38,11 @@ def load_dataset(subset='Train', data_dir='Deepfake_Dataset', batch_size=32, shu
         indices = np.random.choice(len(dataset), num_samples, replace=False)
         # Create a subset of the dataset
         dataset = Subset(dataset, indices)
-    
-    # Create a DataLoader for the dataset (or subset)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-    
+
+    if noise:
+        mixed_dataset = MixedDataset(dataset, noise_fraction=0.5, noise_type="gaussian", transform=transform)
+        dataloader = DataLoader(mixed_dataset, batch_size=batch_size, shuffle=shuffle)
+    else:
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
     return dataloader
