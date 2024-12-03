@@ -1,5 +1,5 @@
 **/.DS_Store
 __pycache__/
 Deepfake_Dataset/
-freq_part_imgs/
+PartitionedDataset/
 Subset_Dataset/

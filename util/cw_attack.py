@@ -4,8 +4,9 @@ import torch.optim as optim
 import numpy as np
 
 class CarliniWagnerL2Attack:
-    def __init__(self, model, targeted=False, confidence=0, max_iter=1000, learning_rate=0.01, binary_search_steps=5, initial_const=1e-3):
-        self.model = model
+    def __init__(self, model, device, targeted=False, confidence=0, max_iter=10, learning_rate=0.01, binary_search_steps=5, initial_const=1e-3):
+        self.model = model.to(device)  # Move model to the device
+        self.device = device  # Store device
         self.targeted = targeted
         self.confidence = confidence
         self.max_iter = max_iter
@@ -20,13 +21,13 @@ class CarliniWagnerL2Attack:
         real = torch.gather(output, 1, y.view(-1, 1))  # Correct class score
         other = torch.max(output + (1 - y) * 10000, 1)[0]  # Maximum other class score
         if self.targeted:
-            return torch.max(other - real + self.confidence, torch.tensor(0.0).cuda())  # Targeted attack
+            return torch.max(other - real + self.confidence, torch.tensor(0.0, device=self.device))  # Targeted attack
         else:
-            return torch.max(real - other + self.confidence, torch.tensor(0.0).cuda())  # Untargeted attack
+            return torch.max(real - other + self.confidence, torch.tensor(0.0, device=self.device))  # Untargeted attack
 
     def perturb(self, image, target=None):
-        # Start with a small random perturbation
-        image = image.detach().requires_grad_(True)
+        # Move image to the correct device
+        image = image.to(self.device).detach().requires_grad_(True)
 
         # Initialize adversarial example
         adv_image = image.clone()
@@ -64,4 +65,3 @@ class CarliniWagnerL2Attack:
             return adv_image.detach()
 
         return adv_image
-

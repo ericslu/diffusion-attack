@@ -24,15 +24,19 @@ def get_subset(subset='Train', data_dir='Deepfake_Dataset', data_percentage=1.0,
     return dataset
 
 
-def load_dataset(subset, batch_size=32, shuffle=True):
+def load_dataset(dataset, batch_size=32, shuffle=True):
 
-    # Define data transformation
-    subset.dataset.transform = transforms.Compose([
+    transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    dataloader = DataLoader(subset, batch_size=batch_size, shuffle=shuffle)
+    if isinstance(dataset, Subset):
+        dataset.dataset.transform = transform
+    else:
+        dataset.transform = transform
+
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
     return dataloader

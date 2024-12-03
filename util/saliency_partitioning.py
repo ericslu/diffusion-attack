@@ -2,141 +2,114 @@ import numpy as np
 import torch
 from scipy.fft import dct, idct
 from util.cw_attack import CarliniWagnerL2Attack
+from util.fgsm_attack import FGSM
 import cv2
 
-# Load model (Assuming you have a pretrained model like ResNet50)
-def load_model(model_path):
-    model = torch.load(model_path)
-    model.eval()  # Set model to evaluation mode
-    return model
-
-# Apply 2D DCT to an image
+# Apply 2D DCT
 def dct2(image):
     return dct(dct(image, axis=0, norm='ortho'), axis=1, norm='ortho')
 
-# Apply inverse DCT to a transformed image
+# Apply 2D inverse DCT
 def idct2(image):
     return idct(idct(image, axis=0, norm='ortho'), axis=1, norm='ortho')
 
-# Function to compute the saliency for a frequency band
-def compute_saliency(model, image, freq_band, attack_steps=1000, epsilon=0.01):
-    # Apply the frequency band mask (frequency partitioning)
-    perturbed_image = apply_frequency_mask(image, freq_band)
-    perturbed_image_tensor = torch.tensor(perturbed_image).float().unsqueeze(0).permute(0, 3, 1, 2).cpu()
+# Generate radial frequency bands for DCT
+def generate_radial_frequency_bands(image_shape, num_bands):
+    h, w = image_shape[:2]
+    y, x = np.ogrid[:h, :w]
+    center = (h // 2, w // 2)
+    distance = np.sqrt((x - center[1]) ** 2 + (y - center[0]) ** 2)
+
+    max_dist = distance.max()
+    band_edges = np.linspace(0, max_dist, num_bands + 1)
+    
+    bands = []
+    for i in range(num_bands):
+        band_mask = (distance >= band_edges[i]) & (distance < band_edges[i + 1])
+        bands.append(band_mask)
+    
+    return bands
+
+# Apply frequency mask
+def apply_frequency_mask(image, mask):
+    dct_coeffs = dct2(image)
+    if mask.ndim == 2:  # Expand mask to match the RGB channels
+        mask = np.expand_dims(mask, axis=-1)
+    masked_dct = dct_coeffs * mask
+    return idct2(masked_dct)
+
+# Compute saliency for a single frequency
+def compute_saliency(model, image, freq_mask, attack, device='cpu'):
+    perturbed_image = apply_frequency_mask(image, freq_mask)
+    perturbed_image_tensor = (
+        torch.tensor(perturbed_image)
+        .float()
+        .unsqueeze(0)
+        .permute(0, 3, 1, 2)
+        .to(device)
+    )
     perturbed_image_tensor.requires_grad = True
-    
-    # Perform Carlini-Wagner attack on the perturbed image
-    attack = CarliniWagnerL2Attack(model, learning_rate=epsilon)
-    delta_x = attack.perturb(perturbed_image_tensor)  # Get perturbation
-    
-    # Compute gradients of the model with respect to perturbed image
-    output = model(perturbed_image_tensor)  # Forward pass
-    loss = output.sum()  # Sum of all outputs (can change based on specific task)
-    loss.backward()  # Backward pass to compute gradients
-    
-    # Gradient with respect to the input image
+
+    # Apply Carlini-Wagner attack
+    delta_x = attack.perturb(perturbed_image_tensor)
+
+    # Compute forward pass and gradients
+    output = model(perturbed_image_tensor)
+    loss = output.sum()
+    loss.backward()
+
+    # Compute saliency using gradients and perturbation magnitude
     gradient = perturbed_image_tensor.grad.detach().cpu().numpy()
-    saliency = np.sum(gradient * delta_x.cpu().numpy())  # Compute saliency as dot product
+    delta_x_np = delta_x.cpu().numpy()
+    saliency = np.mean(gradient * delta_x_np)  # Weighted sum of gradients and perturbation
     return saliency
 
-# Function to generate frequency bands
-def generate_frequency_bands(image, num_bands=5):
-    """
-    Generate frequency bands for the DCT coefficients of an image.
-    The number of bands is specified by `num_bands`.
-    """
-    dct_coeffs = dct2(image)  # Convert image to frequency domain
-    
-    # Define frequency bands by slicing the DCT coefficients array
-    band_shape = dct_coeffs.shape
-    band_size = band_shape[0] * band_shape[1] // num_bands
-    
-    # Create frequency bands by slicing the DCT coefficients
-    frequencies = []
-    for i in range(num_bands):
-        start_idx = i * band_size
-        end_idx = (i + 1) * band_size if i < num_bands - 1 else band_shape[0] * band_shape[1]
-        band = np.unravel_index(np.arange(start_idx, end_idx), band_shape)
-        frequencies.append(band)
-    
-    return frequencies
-
-# Apply partition mask (simulate frequency filtering)
-def apply_partition_mask(image, partition, frequencies):
-    """
-    Apply a mask to the DCT coefficients based on the partition.
-    `partition` is a list of frequency indices that belong to this partition.
-    `frequencies` is a list of frequency ranges or bands generated earlier.
-    """
-    dct_coeffs = dct2(image)  # Convert image to frequency domain
-    
-    # Create a mask based on the partition indices
-    mask = np.zeros_like(dct_coeffs)
-    
-    for band_idx in partition:
-        band = frequencies[band_idx]
-        mask[band] = 1  # Set the mask for this frequency band
-    
-    # Apply the mask and return the inverse DCT of the modified coefficients
-    return idct2(dct_coeffs * mask)
-
-# Apply frequency band mask (simulate frequency filtering)
-def apply_frequency_mask(image, freq_band):
-    dct_coeffs = dct2(image)  # Convert image to frequency domain
-    mask = np.zeros_like(dct_coeffs)
-    mask[freq_band] = 1  # Only keep the frequencies in the given band
-    return idct2(dct_coeffs * mask)  # Inverse DCT after masking frequencies
-
-# Function to compute and sort saliencies for all frequencies
-def compute_frequency_saliencies(model, image, frequencies, attack_steps=1000, epsilon=0.01):
+# Compute saliencies for all frequency bands
+def compute_frequency_saliencies(model, image, bands, attack_steps=1000, epsilon=0.01, device='cpu', attack_type = "fgsm"):
+    if attack_type == "cw":
+        attack = CarliniWagnerL2Attack(model, device, learning_rate=epsilon, max_iter=attack_steps)
+    elif attack_type == "fgsm":
+        attack = FGSM(model, epsilon=epsilon)
     saliencies = []
-    
-    for i, freq_band in enumerate(frequencies):
-        saliency = compute_saliency(model, image, freq_band, attack_steps, epsilon)
-        saliencies.append((i, saliency))  # Store the index and saliency value
-    
-    # Sort frequencies by saliency in descending order
-    sorted_saliencies = sorted(saliencies, key=lambda x: x[1], reverse=True)
-    return sorted_saliencies
+    for i, band_mask in enumerate(bands):
+        saliency = compute_saliency(model, image, band_mask, attack, device)
+        saliencies.append((i, saliency))
+    return sorted(saliencies, key=lambda x: x[1], reverse=True)
 
-# Function to partition frequencies using round-robin
+# Partition frequencies based on saliency in round-robin
 def partition_frequencies(sorted_saliencies, num_models):
     partitions = [[] for _ in range(num_models)]
-    
-    # Round-robin assignment of frequencies to models
     for idx, (freq_idx, _) in enumerate(sorted_saliencies):
         partitions[idx % num_models].append(freq_idx)
-    
     return partitions
 
-# Example: Distribute frequencies for an image
-def partition_image_for_ensemble(model, image, num_models=4, attack_steps=1000, epsilon=0.01):
-    # Assume frequencies are generated or pre-determined, each frequency band could be a range of DCT coefficients
-    frequencies = generate_frequency_bands(image)  # Placeholder for generating frequency bands
-    
-    # Compute saliencies for each frequency
-    sorted_saliencies = compute_frequency_saliencies(model, image, frequencies, attack_steps, epsilon)
-    
-    # Partition frequencies in round-robin fashion
-    partitions = partition_frequencies(sorted_saliencies, num_models)
-    
-    # Create partitioned images for each model
+# Apply partition to image
+def apply_partition(image, partitions, bands):
     partitioned_images = []
     for partition in partitions:
-        partitioned_image = apply_partition_mask(image, partition, frequencies)
+        mask = np.zeros(image.shape[:2])  # Create a 2D mask
+        for band_idx in partition:
+            mask += bands[band_idx]
+        # Expand mask to match the image's channel dimension
+        mask = np.expand_dims(mask, axis=-1)  # Shape becomes (224, 224, 1)
+        partitioned_image = apply_frequency_mask(image, mask)
         partitioned_images.append(partitioned_image)
-    
     return partitioned_images
 
+# Main partition function
+def partition_image_for_ensemble(model, image, num_models=3, num_bands=20, attack_steps=100, epsilon=0.01, device='cpu', attack_type = "fgsm"):
+    bands = generate_radial_frequency_bands(image.shape, num_bands)
+    sorted_saliencies = compute_frequency_saliencies(model, image, bands, attack_steps, epsilon, device, attack_type)
+    partitions = partition_frequencies(sorted_saliencies, num_models)
+    return apply_partition(image, partitions, bands)
+
+# Load and preprocess image
 def load_image(image_path):
-    image = cv2.imread(image_path)  # Load image in color (BGR by default)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
-    image = cv2.resize(image, (224, 224))  # Resize to 224x224 for consistency
-    
-    return image
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    return cv2.resize(image, (224, 224))
 
-# # Example: Load an image and model, then partition the image
-# image = load_image('path_to_image')  # Load an image as a numpy array
-# model = load_model('path_to_model')  # Load a pre-trained model
-
+# Example usage
+# model = YourModelHere
+# image = load_image("example_image.jpg")
 # partitioned_images = partition_image_for_ensemble(model, image)
