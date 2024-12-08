@@ -5,15 +5,12 @@ from util.cw_attack import CarliniWagnerL2Attack
 from util.fgsm_attack import FGSM
 import cv2
 
-# Apply 2D DCT
 def dct2(image):
     return dct(dct(image, axis=0, norm='ortho'), axis=1, norm='ortho')
 
-# Apply 2D inverse DCT
 def idct2(image):
     return idct(idct(image, axis=0, norm='ortho'), axis=1, norm='ortho')
 
-# Generate radial frequency bands for DCT
 def generate_radial_frequency_bands(image_shape, num_bands):
     h, w = image_shape[:2]
     y, x = np.ogrid[:h, :w]
@@ -30,15 +27,13 @@ def generate_radial_frequency_bands(image_shape, num_bands):
     
     return bands
 
-# Apply frequency mask
 def apply_frequency_mask(image, mask):
     dct_coeffs = dct2(image)
-    if mask.ndim == 2:  # Expand mask to match the RGB channels
+    if mask.ndim == 2:
         mask = np.expand_dims(mask, axis=-1)
     masked_dct = dct_coeffs * mask
     return idct2(masked_dct)
 
-# Compute saliency for a single frequency
 def compute_saliency(model, image, freq_mask, attack, device='cpu'):
     perturbed_image = apply_frequency_mask(image, freq_mask)
     perturbed_image_tensor = (
@@ -50,18 +45,14 @@ def compute_saliency(model, image, freq_mask, attack, device='cpu'):
     )
     perturbed_image_tensor.requires_grad = True
 
-    # Apply Carlini-Wagner attack
     delta_x = attack.perturb(perturbed_image_tensor)
 
-    # Compute forward pass and gradients
     output = model(perturbed_image_tensor)
     loss = output.sum()
     loss.backward()
-
-    # Compute saliency using gradients and perturbation magnitude
     gradient = perturbed_image_tensor.grad.detach().cpu().numpy()
     delta_x_np = delta_x.cpu().numpy()
-    saliency = np.mean(gradient * delta_x_np)  # Weighted sum of gradients and perturbation
+    saliency = np.mean(gradient * delta_x_np)
     return saliency
 
 # Compute saliencies for all frequency bands
@@ -76,40 +67,30 @@ def compute_frequency_saliencies(model, image, bands, attack_steps=1000, epsilon
         saliencies.append((i, saliency))
     return sorted(saliencies, key=lambda x: x[1], reverse=True)
 
-# Partition frequencies based on saliency in round-robin
 def partition_frequencies(sorted_saliencies, num_models):
     partitions = [[] for _ in range(num_models)]
     for idx, (freq_idx, _) in enumerate(sorted_saliencies):
         partitions[idx % num_models].append(freq_idx)
     return partitions
 
-# Apply partition to image
 def apply_partition(image, partitions, bands):
     partitioned_images = []
     for partition in partitions:
-        mask = np.zeros(image.shape[:2])  # Create a 2D mask
+        mask = np.zeros(image.shape[:2])
         for band_idx in partition:
             mask += bands[band_idx]
-        # Expand mask to match the image's channel dimension
-        mask = np.expand_dims(mask, axis=-1)  # Shape becomes (224, 224, 1)
+        mask = np.expand_dims(mask, axis=-1)
         partitioned_image = apply_frequency_mask(image, mask)
         partitioned_images.append(partitioned_image)
     return partitioned_images
 
-# Main partition function
 def partition_image_for_ensemble(model, image, num_models=3, num_bands=20, attack_steps=100, epsilon=0.01, device='cpu', attack_type = "fgsm"):
     bands = generate_radial_frequency_bands(image.shape, num_bands)
     sorted_saliencies = compute_frequency_saliencies(model, image, bands, attack_steps, epsilon, device, attack_type)
     partitions = partition_frequencies(sorted_saliencies, num_models)
     return apply_partition(image, partitions, bands)
 
-# Load and preprocess image
 def load_image(image_path):
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return cv2.resize(image, (224, 224))
-
-# Example usage
-# model = YourModelHere
-# image = load_image("example_image.jpg")
-# partitioned_images = partition_image_for_ensemble(model, image)

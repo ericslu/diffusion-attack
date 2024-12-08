@@ -11,7 +11,7 @@ def add_gaussian_noise(image, mean=0, std=0.1):
     """
     noise = np.random.normal(mean, std, image.shape)
     noisy_image = image + noise
-    return np.clip(noisy_image, 0, 1)  # Ensure pixel values are in range [0, 1]
+    return np.clip(noisy_image, 0, 1)
 
 class MixedDataset(Dataset):
     def __init__(self, root_dir, noise_fraction=0.5, noise_type="gaussian", transform=None):
@@ -26,8 +26,6 @@ class MixedDataset(Dataset):
         self.noise_fraction = noise_fraction
         self.noise_type = noise_type
         self.transform = transform
-
-        # Find image paths and labels
         self.image_paths = []
         self.labels = []
         for label, subdir in enumerate(["Real", "Fake"]):
@@ -35,11 +33,9 @@ class MixedDataset(Dataset):
             for file_name in os.listdir(subdir_path):
                 if file_name.endswith(".png") or file_name.endswith(".jpg"):
                     self.image_paths.append(os.path.join(subdir_path, file_name))
-                    self.labels.append(label)  # 0 for Real, 1 for Fake
+                    self.labels.append(label)
 
         self.num_images = len(self.image_paths)
-
-        # Randomly select indices for noisy images
         self.noisy_indices = set(np.random.choice(self.num_images, int(self.noise_fraction * self.num_images), replace=False))
 
     def __len__(self):
@@ -49,21 +45,16 @@ class MixedDataset(Dataset):
         image_path = self.image_paths[idx]
         label = self.labels[idx]
 
-        # Load the image
         image = Image.open(image_path).convert('RGB')
 
-        # Convert image to [0, 1] range for processing
         image = np.array(image) / 255.0
 
-        # Check if the current index is in the noisy subset
         if idx in self.noisy_indices:
             if self.noise_type == "gaussian":
                 image = add_gaussian_noise(image)
 
-        # Ensure the image is in the valid [0, 255] range and convert back to uint8
         image = np.clip(image * 255, 0, 255).astype(np.uint8)
 
-        # Convert back to PIL Image
         image = Image.fromarray(image)
 
         if self.transform:

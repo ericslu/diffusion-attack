@@ -21,17 +21,11 @@ class FGSM:
         inputs = inputs.clone().detach().requires_grad_(True)
         outputs = self.model(inputs)
 
-        # If labels are not provided, use the predicted labels
         if labels is None:
             labels = torch.argmax(outputs, dim=1)
-
-        # Compute the loss
         loss = F.cross_entropy(outputs, labels)
         loss.backward()
-
-        # Compute perturbation
         perturbation = self.epsilon * inputs.grad.sign()
 
-        # Generate adversarial examples
         adversarial_examples = inputs + perturbation
         return adversarial_examples.detach()

@@ -33,9 +33,8 @@ from tqdm import tqdm  # Import tqdm for progress bar
 #     print("Training complete!")  # Inform the user that training has finished
 
 def train_with_validation(model, train_loader, validation_loader, criterion, optimizer, device, num_epochs=10):
-    model.train()  # Set the model to training mode
+    model.train()
     for epoch in range(num_epochs):
-        model.train()  # Ensure model is in train mode
         total_train_loss = 0
         print(f"Epoch [{epoch + 1}/{num_epochs}] - Training:")
         
@@ -50,14 +49,11 @@ def train_with_validation(model, train_loader, validation_loader, criterion, opt
         
         avg_train_loss = total_train_loss / len(train_loader)
         print(f"Training Loss: {avg_train_loss:.4f}")
-
-        # Validate the model after each epoch
         avg_val_loss, val_accuracy = validate(model, validation_loader, criterion, device)
         print(f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}%\n")
 
-# Validation function
 def validate(model, dataloader, criterion, device):
-    model.eval()  # Set model to evaluation mode for validation
+    model.eval()
     total_loss = 0
     correct = 0
     total = 0
@@ -68,8 +64,7 @@ def validate(model, dataloader, criterion, device):
             outputs = model(images)
             loss = criterion(outputs, labels)
             total_loss += loss.item()
-            
-            # Calculate accuracy
+
             _, predicted = torch.max(outputs, 1)
             correct += (predicted == labels).sum().item()
             total += labels.size(0)

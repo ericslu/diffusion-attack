@@ -18,10 +18,8 @@ def get_scores(ensemble_models, dataloaders, device):
     total_samples = 0
     total_loss = 0
     criterion = torch.nn.BCEWithLogitsLoss()
-
-    # Iterate through dataloaders for each ensemble model
     for model, dataloader in zip(ensemble_models, dataloaders):
-        model.eval()  # Set to eval mode
+        model.eval()
         for inputs, labels in dataloader:
             inputs, labels = inputs.to(device), labels.to(device)
 
