@@ -6,9 +6,7 @@ import torch.optim as optim
 class DeepfakeDetectorCNN(nn.Module):
     def __init__(self, num_classes=2):
         super(DeepfakeDetectorCNN, self).__init__()
-        # Use ResNet18 as the CNN backbone
         self.cnn = models.resnet18(pretrained=True)
-        # Replace the final fully connected layer
         in_features = self.cnn.fc.in_features
         self.cnn.fc = nn.Sequential(
             nn.Linear(in_features, 256),
